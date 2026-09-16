@@ -1,71 +1,51 @@
-[![CI](https://github.com/checkpoint-restore/criu/actions/workflows/ci.yml/badge.svg)](
-    https://github.com/checkpoint-restore/criu/actions/workflows/ci.yml)
-[![CircleCI](https://circleci.com/gh/checkpoint-restore/criu.svg?style=svg)](
-    https://circleci.com/gh/checkpoint-restore/criu)
+# CRIU — link-remap reuse fork
 
-<p align="center"><img src="Documentation/logo.svg" width="256px"/></p>
+This is a fork of [checkpoint-restore/criu](https://github.com/checkpoint-restore/criu).
+The upstream CRIU README is preserved verbatim as
+[`README.original.md`](README.original.md).
 
-## CRIU -- A project to implement checkpoint/restore functionality for Linux
+The default branch, **`snapshot/link-remap-reusable`**, adds one change on top of
+upstream `criu-dev` (`33482a1`):
 
-CRIU (stands for Checkpoint and Restore in Userspace) is a utility to checkpoint/restore Linux tasks.
+## Recreate a missing link-remap source so a checkpoint image can be restored more than once
 
-Using this tool, you can freeze a running application (or part of it) and checkpoint
-it to a hard drive as a collection of files. You can then use the files to restore and run the
-application from the point it was frozen at. The distinctive feature of the CRIU
-project is that it is mainly implemented in user space. There are some more projects
-doing C/R for Linux, and so far CRIU [appears to be](https://criu.org/Comparison_to_other_CR_projects)
-the most feature-rich and up-to-date with the kernel.
+**Problem.** With `--link-remap`, at dump time CRIU creates a temporary hard link
+`link_remap.<id>` next to a multi-linked file (e.g. the POSIX semaphores
+`/dev/shm/sem.*` that Python `multiprocessing` creates). The first restore
+consumes/renames that temp, but its contents are not stored in the image, so a
+second restore of the same image fails with:
 
-CRIU project is (almost) the never-ending story, because we have to always keep up with the
-Linux kernel supporting checkpoint and restore for all the features it provides. Thus we're
-looking for contributors of all kinds -- feedback, bug reports, testing, coding, writing, etc.
-Please refer to [CONTRIBUTING.md](CONTRIBUTING.md) if you would like to get involved.
+```
+Can't link dev/shm/link_remap.<id> -> dev/shm/sem.<name>: No such file or directory
+```
 
-The project [started](https://criu.org/History) as the way to do live migration for OpenVZ
-Linux containers, but later grew to more sophisticated and flexible tool. It is currently
-used by (integrated into) OpenVZ, LXC/LXD, Docker, and other software, project gets tremendous
-help from the community, and its packages are included into many Linux distributions.
+i.e. **checkpoint images were effectively one-shot** for such files.
 
-The project home is at http://criu.org. This wiki contains all the knowledge base for CRIU we have.
-Pages worth starting with are:
-- [Installation instructions](http://criu.org/Installation)
-- [A simple example of usage](http://criu.org/Simple_loop)
-- [Examples of more advanced usage](https://criu.org/Category:HOWTO)
-- Troubleshooting can be hard, some help can be found [here](https://criu.org/When_C/R_fails), [here](https://criu.org/What_cannot_be_checkpointed) and [here](https://criu.org/index.php?title=FAQ)
+**Fix** (`criu/files-reg.c`, `rfi_remap()`): if the link-remap source is missing
+(`ENOENT`), recreate a placeholder of the expected size from the dumped
+`RegFileEntry` and retry the link. The real content is written from the dumped
+pages once the file is opened, so the restored process is unchanged.
 
-### Checkpoint and restore of simple loop process
-<p align="center"><a href="https://asciinema.org/a/232445"><img src="https://asciinema.org/a/232445.png" width="572px" height="412px"/></a></p>
+**Effect.** A checkpoint image can be restored repeatedly. Verified with a warm
+vLLM worker (whose engine uses `/dev/shm` POSIX semaphores): the same image
+restored twice, both times to a correct inference.
 
-## Advanced features
+## Build / install
 
-As main usage for CRIU is live migration, there's a library for it called P.Haul. Also the
-project exposes two cool core features as standalone libraries. These are libcompel for parasite code
-injection and libsoccr for TCP connections checkpoint-restore.
+```bash
+git clone git@github.com:eliird/CRIU-multiprocess.git   # this fork
+cd CRIU-multiprocess
+sudo apt-get install -y build-essential pkg-config protobuf-c-compiler \
+  libprotobuf-c-dev libprotobuf-dev protobuf-compiler libnl-3-dev \
+  libnl-route-3-dev libnet1-dev libcap-dev python3-protobuf libbsd-dev \
+  uuid-dev libaio-dev iproute2
+make -j"$(nproc)" all
+sudo make install-lib install-crit install-criu install-compel install-cuda_plugin
+sudo install -m 0755 plugins/cuda/cuda_plugin.so /usr/lib/criu/cuda_plugin.so
+```
 
-### Live migration
+(`make install` also builds man pages and needs `asciidoc`.)
 
-True [live migration](https://criu.org/Live_migration) using CRIU is possible, but doing
-all the steps by hands might be complicated. The [phaul sub-project](https://criu.org/P.Haul)
-provides a Go library that encapsulates most of the complexity. This library and the Go bindings
-for CRIU are stored in the [go-criu](https://github.com/checkpoint-restore/go-criu) repository.
-
-
-### Parasite code injection
-
-In order to get state of the running process CRIU needs to make this process execute
-some code, that would fetch the required information. To make this happen without
-killing the application itself, CRIU uses the [parasite code injection](https://criu.org/Parasite_code)
-technique, which is also available as a standalone library called [libcompel](https://criu.org/Compel).
-
-### TCP sockets checkpoint-restore
-
-One of the CRIU features is the ability to save and restore state of a TCP socket
-without breaking the connection. This functionality is considered to be useful by
-itself, and we have it available as the [libsoccr library](https://criu.org/Libsoccr).
-
-## Licence
-
-The project is licensed under GPLv2 (though files sitting in the lib/ directory are LGPLv2.1).
-
-All files in the images/ directory are licensed under the Expat license (so-called MIT).
-See the images/LICENSE file.
+To apply just the change to upstream CRIU instead, use the extracted patch:
+`patches/criu-link-remap-reusable.patch` in
+[eliird/vllm-snapshot](https://github.com/eliird/vllm-snapshot).
