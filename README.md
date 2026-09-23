@@ -84,3 +84,12 @@ sudo install -m 0755 plugins/cuda/cuda_plugin.so /usr/lib/criu/cuda_plugin.so
 To apply just the change to upstream CRIU instead, use the extracted patch:
 `patches/criu-link-remap-reusable.patch` in
 [eliird/vllm-snapshot](https://github.com/eliird/vllm-snapshot).
+
+## Optional: remap CUDA devices on restore (`CRIU_CUDA_DEVICE_MAP`)
+
+Restoring a CUDA checkpoint onto a different set of GPUs (another device set or
+node) requires `cuda-checkpoint --device-map oldUuid1=newUuid1,...`. The CUDA
+plugin never passed it. If `CRIU_CUDA_DEVICE_MAP` is set in the `criu restore`
+process environment, the plugin now appends `--device-map <value>` for the
+restore action. UUIDs use cuda-checkpoint's own format
+(`GPU-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`).
