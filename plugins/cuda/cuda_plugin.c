@@ -261,16 +261,32 @@ static int cuda_process_checkpoint_action(int pid, const char *action, unsigned 
 {
 	char pid_buf[16];
 	char timeout_buf[16];
+	int n = 5; /* next free slot in args[] */
+	const char *devmap;
 
 	snprintf(pid_buf, sizeof(pid_buf), "%d", pid);
 
-	const char *args[] = { CUDA_CHECKPOINT, "--action", action, "--pid", pid_buf, NULL /* --timeout */,
-			       NULL /* timeout_val */, NULL };
+	/* Room for: cuda-checkpoint --action <a> --pid <p> [--timeout <t>]
+	 * [--device-map <m>] NULL */
+	const char *args[12] = { CUDA_CHECKPOINT, "--action", action, "--pid", pid_buf, NULL };
 	if (timeout > 0) {
 		snprintf(timeout_buf, sizeof(timeout_buf), "%d", timeout);
-		args[5] = "--timeout";
-		args[6] = timeout_buf;
+		args[n++] = "--timeout";
+		args[n++] = timeout_buf;
 	}
+
+	/*
+	 * GPU UUIDs can differ when the image is restored onto different devices
+	 * (e.g. another set of GPUs, or another node). cuda-checkpoint can remap
+	 * them with --device-map old=new[,old=new]. Supplied by the restore wrapper
+	 * via CRIU_CUDA_DEVICE_MAP (only meaningful for the restore action).
+	 */
+	devmap = getenv("CRIU_CUDA_DEVICE_MAP");
+	if (devmap != NULL && devmap[0] != '\0' && strcmp(action, ACTION_RESTORE) == 0) {
+		args[n++] = "--device-map";
+		args[n++] = devmap;
+	}
+	args[n] = NULL;
 
 	return launch_cuda_checkpoint(args, msg_buf, buf_size);
 }
