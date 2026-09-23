@@ -4,7 +4,7 @@ This is a fork of [checkpoint-restore/criu](https://github.com/checkpoint-restor
 The upstream CRIU README is preserved verbatim as
 [`README.original.md`](README.original.md).
 
-The default branch, **`snapshot/link-remap-reusable`**, adds one change on top of
+The default branch, **`snapshot/link-remap-reusable`**, adds two changes on top of
 upstream `criu-dev` (`33482a1`):
 
 ## Recreate a missing link-remap source so a checkpoint image can be restored more than once
@@ -29,6 +29,41 @@ pages once the file is opened, so the restored process is unchanged.
 **Effect.** A checkpoint image can be restored repeatedly. Verified with a warm
 vLLM worker (whose engine uses `/dev/shm` POSIX semaphores): the same image
 restored twice, both times to a correct inference.
+
+## Recreate a missing regular file on a memory filesystem so images are reusable and node-portable
+
+**Problem.** Some regular files live on a memory filesystem, notably POSIX
+shared memory under `/dev/shm` (e.g. Python
+`multiprocessing.shared_memory` segments named `psm_*`, which vLLM's engine and
+tensor-parallel workers use for IPC). Such a file is *not* a ghost, so CRIU
+stores only its `RegFileEntry` metadata (size/mode) plus the mapped pages and
+assumes the path keeps existing. That holds for a same-host restore immediately
+after the dump (the dump leaves the file behind), but not for:
+
+- a **second restore** of the same images (the first restored process unlinks the
+  segment on exit), or
+- a restore on **another node / in another container** (the file never existed
+  there),
+
+and the restore fails with:
+
+```
+Error (criu/files-reg.c): Can't open file dev/shm/psm_<hex> on restore: No such file or directory
+```
+
+i.e. images with such files are effectively **one-shot and node-bound**.
+
+**Fix** (`criu/files-reg.c`, `do_open_reg_noseek_flags()`): if the open fails with
+`ENOENT` for a non-remap, non-external regular file that has a recorded size,
+recreate a placeholder with the recorded size/mode and retry the open. The real
+content is written back from the dumped pages once the file is mapped;
+`validate_file()` still checks size and mode, so a genuine mismatch is still
+reported.
+
+**Effect.** Checkpoint images containing `/dev/shm` shared memory can be restored
+repeatedly and on another node. Verified with a warm vLLM **TP=2** worker
+(4× Tesla T4, driver 580, NCCL over SHM/IPC): the same image now restores more
+than once, and TP=2 restore no longer fails on `dev/shm/psm_*`.
 
 ## Build / install
 
