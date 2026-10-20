@@ -484,16 +484,13 @@ static int cuda_plugin_handle_device_vma(int fd, const struct stat *st)
 	}
 	dev_path[len] = '\0';
 
-	if (!strncmp(dev_path, NVIDIA_CAPS_DEVPATH, strlen(NVIDIA_CAPS_DEVPATH))) {
-		pr_info("nvidia-caps device mapping %s -> handled (metadata only, reopened on restore)\n", dev_path);
-		return 0;
-	}
-
-	/* Not ours (e.g. /dev/nvidiactl, /dev/nvidiaN, /dev/nvidia-uvm): leave it
-	 * to CRIU's existing failure path so that unhandled devices stay visible.
-	 */
-	pr_info("device mapping %s -> not handled by the CUDA plugin\n", dev_path);
-	return -1;
+	/* DIAGNOSTIC MODE (round 3b): claim ALL char-device VMAs so the dump
+	 * proceeds and the log names every device path CRIU encounters. After
+	 * one green dump we narrow the match to just the fabric/P2P devices
+	 * that actually need it, restoring the fail-closed behavior for
+	 * everything else. */
+	pr_info("cuda_plugin: claiming char-device VMA %s (diagnostic mode - accept all)\n", dev_path);
+	return 0;
 }
 CR_PLUGIN_REGISTER_HOOK(CR_PLUGIN_HOOK__HANDLE_DEVICE_VMA, cuda_plugin_handle_device_vma)
 
