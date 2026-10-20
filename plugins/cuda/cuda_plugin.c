@@ -12,9 +12,12 @@
 
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
+#include <string.h>
 #include <unistd.h>
 #include <sys/ptrace.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 
 /* cuda-checkpoint binary should live in your PATH */
@@ -417,6 +420,82 @@ int cuda_plugin_checkpoint_devices(int pid)
 	return status != 0 ? -1 : int_ret;
 }
 CR_PLUGIN_REGISTER_HOOK(CR_PLUGIN_HOOK__CHECKPOINT_DEVICES, cuda_plugin_checkpoint_devices);
+
+/* CUDA fabric/NVLS window nodes: per-context capability devices that the driver
+ * MMAPs on NVSwitch systems (Blackwell/B300). Char devices, so CRIU needs a
+ * plugin to claim them. See cuda_plugin_handle_device_vma() below.
+ */
+#define NVIDIA_CAPS_DEVPATH "/dev/nvidia-caps/"
+
+/* CR_PLUGIN_HOOK__HANDLE_DEVICE_VMA: decide whether a character-device mapping
+ * should abort the dump.
+ *
+ * CRIU calls this hook for every VMA that is neither a regular file nor
+ * /dev/zero (criu/proc_parse.c: handle_vma_plugin() -> VMA_EXT_PLUGIN in
+ * parse_vma()). A plugin must return 0 to claim the VMA; otherwise CRIU reports
+ *   "handle_device_vma plugin failed" +
+ *   "Can't handle non-regular mapping on <pid>'s map <addr>"
+ * and aborts in "Collect mappings". The CUDA plugin previously registered no
+ * handler for this hook at all, so *any* device mapping in a CUDA process was
+ * fatal.
+ *
+ * On Blackwell (B300) over NVSwitch the driver mmaps
+ * /dev/nvidia-caps/nvidia-capN for the NVLS/fabric (multicast) window when more
+ * than one rank talks to the switch. At world_size == 1 no fabric VMA
+ * materializes, which is why TP1 dumps fine while TP>1 died here.
+ *
+ * These mappings hold no restorable user-space state: the driver re-creates the
+ * window. Claiming the VMA (return 0) makes CRIU store only the mapping
+ * metadata and reopen the cap node at restore (VMA_EXT_PLUGIN); if the driver
+ * epoch differs after restore, the cuda-checkpoint RESUME_DEVICES path
+ * re-creates the CUDA state and the mapping on wake.
+ *
+ * The hook receives the already-opened VMA backing file (fd) plus its stat, so
+ * the device path is resolved from /proc/self/fd/<fd> - no path guessing and it
+ * works for map_files-opened descriptors too.
+ */
+static int cuda_plugin_handle_device_vma(int fd, const struct stat *st)
+{
+	char fd_path[64];
+	char dev_path[PATH_MAX];
+	ssize_t len;
+
+	if (plugin_disabled) {
+		/* No cuda-checkpoint: keep CRIU's existing failure path. */
+		return -ENOTSUP;
+	}
+
+	/* CRIU also calls the hook for regular/memfd mappings; only char devices
+	 * are ours to judge (mirrors the devzero check in proc_parse.c).
+	 */
+	if (!S_ISCHR(st->st_mode) || fd < 0)
+		return -1;
+
+	len = snprintf(fd_path, sizeof(fd_path), "/proc/self/fd/%d", fd);
+	if (len < 0 || (size_t)len >= sizeof(fd_path)) {
+		pr_err("Unable to build fd path for fd %d\n", fd);
+		return -1;
+	}
+
+	len = readlink(fd_path, dev_path, sizeof(dev_path) - 1);
+	if (len < 0) {
+		pr_perror("Unable to resolve device path of fd %d", fd);
+		return -1;
+	}
+	dev_path[len] = '\0';
+
+	if (!strncmp(dev_path, NVIDIA_CAPS_DEVPATH, strlen(NVIDIA_CAPS_DEVPATH))) {
+		pr_info("nvidia-caps device mapping %s -> handled (metadata only, reopened on restore)\n", dev_path);
+		return 0;
+	}
+
+	/* Not ours (e.g. /dev/nvidiactl, /dev/nvidiaN, /dev/nvidia-uvm): leave it
+	 * to CRIU's existing failure path so that unhandled devices stay visible.
+	 */
+	pr_info("device mapping %s -> not handled by the CUDA plugin\n", dev_path);
+	return -1;
+}
+CR_PLUGIN_REGISTER_HOOK(CR_PLUGIN_HOOK__HANDLE_DEVICE_VMA, cuda_plugin_handle_device_vma)
 
 int cuda_plugin_pause_devices(int pid)
 {
