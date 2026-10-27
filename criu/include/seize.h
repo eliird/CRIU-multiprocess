@@ -1,8 +1,12 @@
 #ifndef __CR_SEIZE_H__
 #define __CR_SEIZE_H__
 
+#include <signal.h>
 #include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 #include <sys/types.h>
+/* Compel's arch syscall types require siginfo_t and (on x86) uint64_t. */
 #include <compel/ksigset.h>
 
 /* Owned by the tracer, never by an API worker. Zero-initialize before use.

@@ -14,12 +14,23 @@ CUDA_TEST_CPPFLAGS += -iquote../../criu/include
 CUDA_TEST_CPPFLAGS += -iquote../../criu/arch/$(CUDA_TEST_ARCH)/include/
 CUDA_TEST_CPPFLAGS += -iquote../..
 CUDA_TEST_CPPFLAGS += -iquote$(CUDA_PLUGIN_DIR)
+CUDA_TEST_CPPFLAGS += -I../../compel/include/uapi
 
 PRESERVE_GITIGNORE := y
 include ../zdtm/Makefile.inc
 
-all:	$(TARGETS)
+all:	$(TARGETS) cuda-headers-check
 .PHONY: all
+
+# Compile public headers first, without a preceding include masking their
+# dependencies. cuda_wait.c also brings seize.h into the device-map test.
+cuda-headers-check:
+	$(E) " CHECK    " CUDA/core headers
+	$(Q)for header in seize.h criu-plugin.h cuda_plugin.h cuda_device_map.h; do \
+		printf '#include "%s"\n' "$$header" | \
+		$(CC) $(CFLAGS) $(CUDA_TEST_CPPFLAGS) -x c -fsyntax-only - || exit; \
+	done
+.PHONY: cuda-headers-check
 
 cuda-checkpoint: cuda-checkpoint.o
 	$(E) " LINK     " $@
