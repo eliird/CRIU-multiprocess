@@ -106,7 +106,7 @@ static int load_remap_file(const char *path)
 	}
 
 	fclose(file);
-	log_info("loaded %zu mapping(s) from %s\n", remap_count, path);
+	pr_warn("inet-remap: loaded %zu mapping(s) from %s\n", remap_count, path);
 	return 0;
 }
 
@@ -120,7 +120,7 @@ static int inet_remap_init(int stage)
 
 	path = getenv(INET_REMAP_ENV);
 	if (path == NULL || path[0] == '\0') {
-		log_info("%s unset; no remap\n", INET_REMAP_ENV);
+		pr_info("%s unset; no remap\n", INET_REMAP_ENV);
 		return 0;
 	}
 
