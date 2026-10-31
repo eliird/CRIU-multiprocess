@@ -142,7 +142,13 @@ static bool rewrite_addr(uint32_t *addr)
 		if (*addr != remaps[i].old_addr)
 			continue;
 
-		*addr = remaps[i].new_addr;
+		{
+			char before[INET_ADDRSTRLEN], after[INET_ADDRSTRLEN];
+			inet_ntop(AF_INET, addr, before, sizeof(before));
+			*addr = remaps[i].new_addr;
+			inet_ntop(AF_INET, addr, after, sizeof(after));
+			pr_warn("inet-remap: rewrote %s -> %s\n", before, after);
+		}
 		return true;
 	}
 
