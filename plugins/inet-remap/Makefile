@@ -21,7 +21,7 @@ inet-remap.so: $(PLUGIN_SRCS) $(PLUGIN_HEADERS)
 	$(call msg-gen, $@)
 	$(Q) $(CC) $(PLUGIN_CFLAGS) $(DEFINES) $(PLUGIN_SRCS) -o $@ $(PLUGIN_INCLUDE) $(PLUGIN_LDFLAGS)
 
-check: inet-remap.so
+check:
 	$(Q) $(CC) -O0 -g -iquote../../include -iquote../../criu/include -iquote../../ \
 	  -o inet-remap-test test_inet_remap_harness.c && ./inet-remap-test
 

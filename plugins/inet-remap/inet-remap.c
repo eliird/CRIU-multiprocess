@@ -26,12 +26,13 @@
 #include <string.h>
 
 #include <string.h>
+#include "log.h"
 #include "criu-plugin.h"
 
 #define INET_REMAP_ENV "CRIU_INET_REMAP_MAP"
 #define INET_REMAP_MAX 256
-#define log_error(fmt, ...) fprintf(stderr, "inet-remap: " fmt, ##__VA_ARGS__)
-#define log_info(fmt, ...) fprintf(stderr, "inet-remap: " fmt, ##__VA_ARGS__)
+#define log_error(fmt, ...) pr_err("inet-remap: " fmt, ##__VA_ARGS__)
+#define log_info(fmt, ...) pr_info("inet-remap: " fmt, ##__VA_ARGS__)
 
 struct inet_remap_entry {
 	uint32_t old_addr;

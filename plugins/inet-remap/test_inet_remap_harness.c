@@ -6,6 +6,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <stdarg.h>
+void print_on_level(unsigned int level, const char *fmt, ...) {
+    va_list ap; va_start(ap, fmt); vfprintf(stderr, fmt, ap); va_end(ap);
+}
 #include "inet-remap.c"
 
 static int failures;
