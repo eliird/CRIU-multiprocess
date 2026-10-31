@@ -25,7 +25,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include <string.h>
 #include "log.h"
 #include "criu-plugin.h"
 
@@ -67,6 +66,12 @@ static int parse_mapping_line(const char *path, unsigned int line_no, char *line
 		log_error("invalid new IPv4 address %s in %s:%u\n", new_ip, path, line_no);
 		return -1;
 	}
+	for (size_t i = 0; i < remap_count; i++) {
+		if (remaps[i].old_addr == old_addr.s_addr) {
+			log_error("duplicate old IPv4 address %s in %s:%u\n", old_ip, path, line_no);
+			return -1;
+		}
+	}
 
 	remaps[remap_count].old_addr = old_addr.s_addr;
 	remaps[remap_count].new_addr = new_addr.s_addr;
@@ -87,13 +92,18 @@ static int load_remap_file(const char *path)
 	}
 
 	while (fgets(line, sizeof(line), file) != NULL) {
+		char *p = line;
 		line_no++;
 		if (strchr(line, '\n') == NULL && !feof(file)) {
 			log_error("line %u in %s is too long\n", line_no, path);
 			fclose(file);
 			return -1;
 		}
-		if (parse_mapping_line(path, line_no, line) != 0) {
+		while (*p == ' ' || *p == '\t')
+			p++;
+		if (*p == '#' || *p == '\n' || *p == '\0')
+			continue;
+		if (parse_mapping_line(path, line_no, p) != 0) {
 			fclose(file);
 			return -1;
 		}
